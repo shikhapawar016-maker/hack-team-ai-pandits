@@ -1,65 +1,9 @@
-name: Provision Infrastructure (Terraform)
-
-# Provisions/updates the Artifact Registry repo and the two AutoPilotX
-# service accounts (terraform/*.tf) - Cloud Run services themselves are NOT
-# Terraform-managed; .github/workflows/deploy.yml creates/updates them
-# imperatively via gcloud run deploy (see k8s/DEPRECATED.md for why this
-# project isn't on GKE - and therefore isn't Terraform-managing a cluster -
-# anymore). Run this workflow first, once, before deploy.yml can succeed
-# (it needs the Artifact Registry repo and both service accounts to exist).
-#
-# NOTE: push trigger is temporarily scoped to manish-hackathon only (not
-# main) so this can run directly off the feature branch while the team
-# consolidates - switch back to main once merged.
-#
-# Auth: Workload Identity Federation, impersonating
-# infrastructure@hack-team-teraformers.iam.gserviceaccount.com via the
-# github-2026 pool/provider the hackathon organizers already provisioned for
-# this project - proven working (see deploy.yml and deploy_openshift.yml,
-# both authenticating this same way). This file previously tried to
-# bootstrap its OWN separate pool (github-actions-pool/github-actions-
-# provider) via a manually-triggered bootstrap-wif job using a one-time SA
-# key - that pool was never actually created (the account driving it lacked
-# IAM admin rights), which is what caused the invalid_target errors this
-# project hit while still targeting GKE. Since a working pool already
-# exists for this exact repo/service-account pair, that whole bootstrap
-# dance is unnecessary and has been removed - no GCP_WIF_PROVIDER or
-# GCP_WIF_BOOTSTRAP_SA_KEY secret needed, no manual pool-creation step.
-#
-# Still requires (see docs/SETUP.md):
-#   GCP_PROJECT_ID   same project deploy.yml uses
-#
-# NOTE: this SA's granted roles, as of the last IAM policy check, were App
-# Engine Admin / Monitoring Editor / Storage Transfer Admin / NotebookLM /
-# Discovery Engine Admin plus three custom "Hackathon Participant User
-# Roles" bundles - none of which are confirmed to include Artifact Registry
-# Admin / Service Account Admin / Project IAM Admin, which terraform/iam.tf's
-# apply needs. Check IAM & Admin -> Roles in the console for what's actually
-# inside those three custom bundles before assuming this "just works" - if
-# they don't cover it, grant the missing roles to this SA directly (you'll
-# need someone with Project IAM Admin rights to do that one-time grant).
-#
-# The id-token: write permission below is required for the OIDC token
-# exchange - without it, google-github-actions/auth has nothing to present
-# to the Workload Identity Pool.
-#
-# The GCS bucket for remote state (named in terraform/backend.hcl, which IS
-# committed - a bucket name isn't sensitive) is created manually, once, via
-# the console/gcloud - it can't be a resource inside the Terraform config
-# that uses it as its own backend (terraform init needs the bucket before it
-# can do anything with the rest of the config). Bucket:
-#   gs://hack-team-teraformers-autopilotx-tfstate  (region us-central1,
-#   uniform bucket-level access, versioning on - see docs/SETUP.md step 1).
+name: GCP Authentication
 
 on:
   push:
-    branches: [manish-hackathon]
-    paths:
-      - "terraform/**"
-      - ".github/workflows/infra.yml"
-  pull_request:
-    paths:
-      - "terraform/**"
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -69,81 +13,18 @@ permissions:
 env:
   WIF_SERVICE_ACCOUNT: infrastructure@hack-team-teraformers.iam.gserviceaccount.com
   WIF_PROVIDER: projects/662541806905/locations/global/workloadIdentityPools/github-2026/providers/github-2026
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
-defaults:
-  run:
-    working-directory: terraform
-
-jobs: 
-  plan:
+jobs:
+  authenticate:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Authenticate to GCP (Workload Identity Federation)
-        uses: google-github-actions/auth@v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.9.8"
-
-      - name: terraform fmt (check only)
-        run: terraform fmt -check -recursive
-
-      - name: terraform init
-        run: terraform init -input=false -backend-config=backend.hcl
-
-      - name: terraform validate
-        run: terraform validate
-
-      - name: terraform plan
-        run: |
-          terraform plan -input=false \
-            -var="project_id=${{ secrets.GCP_PROJECT_ID }}"
-
-  apply:
-    needs: plan
-    # No PR/review gate, consistent with the rest of this project - applies
-    # automatically on every push to the trigger branch above, or on a
-    # manual run. PRs only ever get a plan (job above), never an apply.
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Authenticate to GCP (Workload Identity Federation)
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ env.WIF_PROVIDER }}
-          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.9.8"
-
-      - name: terraform init
-        run: terraform init -input=false -backend-config=backend.hcl
-
-      - name: terraform apply
-        run: |
-          terraform apply -input=false -auto-approve \
-            -var="project_id=${{ secrets.GCP_PROJECT_ID }}"
-
-      - name: Publish outputs to the run summary
-        run: |
-          {
-            echo "### Terraform outputs"
-            echo ''
-            terraform output
-            echo ''
-            echo ""
-            echo "Copy \agent_service_account_email\ into the GCP_WORKLOAD_SA_EMAIL secret deploy.yml needs (see docs/SETUP.md)."
-          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: google-github-actions/setup-gcloud@v3
