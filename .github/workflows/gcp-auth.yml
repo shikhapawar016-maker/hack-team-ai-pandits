@@ -11,7 +11,7 @@ permissions:
   id-token: write 
 
 env:
-  WIF_SERVICE_ACCOUNT: workload@hack-team-ai-pandits.iam.gserviceaccount.com 
+  WIF_SERVICE_ACCOUNT: ai-pandits@db-hackathon.com
   WIF_PROVIDER: projects/1082330458302/locations/global/workloadIdentityPools/github-2026/providers/github-2026
 
 jobs:
