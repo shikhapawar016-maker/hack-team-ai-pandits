@@ -12,7 +12,7 @@ permissions:
 
 env:
   WIF_SERVICE_ACCOUNT: ai-pandits@db-hackathon.com
-  WIF_PROVIDER: projects/1082330458302/locations/global/workloadIdentityPools/github-2026/providers/github-2026
+  WIF_PROVIDER: projects/662541806905/locations/global/workloadIdentityPools/github-2026/providers/github-2026
 
 jobs:
   authenticate:
