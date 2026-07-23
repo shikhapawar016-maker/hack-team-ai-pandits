@@ -26,5 +26,6 @@ jobs:
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+          audience: https://github.com/${{ github.repository_owner }}
 
       - uses: google-github-actions/setup-gcloud@v3
